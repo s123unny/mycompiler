@@ -1,7 +1,6 @@
 mod scanner;
 
 use std::env;
-use std::fs;
 use std::process;
 use std::error::Error;
 
@@ -34,12 +33,7 @@ fn parse_config(args: &[String]) -> Result<Config, &'static str>{
 }
 
 fn compile(config: Config) -> Result<(), Box<dyn Error>> {
-	let contents = fs::read_to_string(config.file_path)?;
-	let contents = contents.as_bytes();
-
-	println!("Read:\n{contents:?}");
-
-	let mut scanner = scanner::Scanner::new(contents);
+	let mut scanner = scanner::Scanner::new(&config.file_path);
 	scanner.scan_tokens();
 	scanner.print_token();
 

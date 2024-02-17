@@ -1,39 +1,44 @@
-#[derive(Default)]
-pub struct Scanner<'a> {
-	source: &'a [u8],
-	current: usize,
+use std::str::Chars;
+use std::fs::File;
+use std::io::{BufRead,BufReader};
+use std::iter::Peekable;
+
+pub struct Scanner {
+	file_path: String,
+	f: BufReader<File>,
 	line: usize,
 	tokens: Vec<Token>,
 }
 
-impl <'a>Scanner<'a> {
-	pub fn new(s: &'a [u8]) -> Self {
-		Self { source: s, current: 0, line: 1, tokens: Vec::new() }
+impl Scanner {
+	pub fn new(file_path: &String) -> Self {
+		let f = BufReader::new(File::open(file_path).expect("Couldn't read file"));
+		let s = Self { file_path: file_path.clone(), f: f, line: 1, tokens: Vec::new()};
+		s
 	}
 	pub fn scan_tokens(&mut self) {
-		while !self.at_end() {
-			self.scan_token();
+		let mut line = String::new();
+		while self.f.read_line(&mut line).expect("Couldn't get line {self.line}") > 0 {
+			self.line += 1;
+			let mut chars = line.chars().peekable();
+			while !self.chars_at_end(&mut chars) {
+				self.scan_token(&mut chars);
+			}
+			line.clear();
 		}
 	}
 
-	fn at_end(&mut self) -> bool {
-		self.current >= self.source.len()
+	fn chars_at_end(&mut self, chars: &mut Peekable<Chars<'_>>) -> bool {
+		chars.peek().is_none()
 	}
 
-	fn scan_token(&mut self) {
-		let c = self.advance();
+	fn scan_token(&mut self, chars: &mut Peekable<Chars<'_>>) {
+		let c = chars.next();
 		match c {
-			b'(' => self.add_token(TokenType::LeftParen),
-			b')' => self.add_token(TokenType::RightParen),
-			b'\n' => self.line += 1,
+			Some('(') => self.add_token(TokenType::LeftParen),
+			Some(')') => self.add_token(TokenType::RightParen),
 			_ => println!("ignore now"),
 		}
-	}
-
-	fn advance(&mut self) -> u8 {
-		let tmp = self.source[self.current];
-		self.current += 1;
-		tmp
 	}
 
 	fn add_token(&mut self, t: TokenType) {
