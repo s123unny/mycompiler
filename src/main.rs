@@ -1,3 +1,5 @@
+mod scanner;
+
 use std::env;
 use std::fs;
 use std::process;
@@ -13,7 +15,7 @@ fn main() {
 
     println!("file {}", config.file_path);
 
-		if let Err(e) = runfile(config) {
+		if let Err(e) = compile(config) {
 			println!("Application error: {e}");
 			process::exit(1);
 		}
@@ -31,10 +33,15 @@ fn parse_config(args: &[String]) -> Result<Config, &'static str>{
 	Ok(Config { file_path })
 }
 
-fn runfile(config: Config) -> Result<(), Box<dyn Error>> {
+fn compile(config: Config) -> Result<(), Box<dyn Error>> {
 	let contents = fs::read_to_string(config.file_path)?;
+	let contents = contents.as_bytes();
 
-	println!("Read:\n{contents}");
+	println!("Read:\n{contents:?}");
+
+	let mut scanner = scanner::Scanner::new(contents);
+	scanner.scan_tokens();
+	scanner.print_token();
 
 	Ok(())
 }
