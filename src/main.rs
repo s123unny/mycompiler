@@ -35,7 +35,7 @@ fn parse_config(args: &[String]) -> Result<Config, &'static str>{
 fn compile(config: Config) -> Result<(), Box<dyn Error>> {
 	let mut scanner = scanner::Scanner::new(&config.file_path);
 	scanner.scan_tokens();
-	scanner.print_token();
+	scanner.print_tokens();
 
 	Ok(())
 }

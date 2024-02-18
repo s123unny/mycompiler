@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufRead,BufReader};
 use std::iter::Peekable;
 use std::process;
+use std::fmt;
 
 pub struct Scanner {
 	file_path: String,
@@ -144,22 +145,14 @@ impl Scanner {
 		process::exit(1);
 	}
 
-	pub fn print_token(&self) {
+	pub fn print_tokens(&self) {
 		let mut line = 0;
 		for token in self.tokens.iter() {
 			if token.line > line {
 				line = token.line;
 				print!("\n{}: ", line);
 			}
-			match &token.token {
-				TokenType::LeftParen => print!("("),
-				TokenType::RightParen => print!(")"),
-				TokenType::String(s) => print!("String<{}>", s),
-				TokenType::Integer(n) => print!("Integer<{}>", n),
-				TokenType::Float(n) => print!("Float<{}>", n),
-				_ => print!("."),
-			}
-			print!(" ");
+			print!("{} ", token);
 		}
 		println!("");
 	}
@@ -190,4 +183,29 @@ enum TokenType {
 struct Token {
 	token: TokenType,
 	line: usize,
+}
+
+impl fmt::Display for Token {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match &self.token {
+			TokenType::LeftParen => write!(f, "("),
+			TokenType::RightParen => write!(f, ")"),
+			TokenType::LeftBrace => write!(f, "{{"),
+			TokenType::RightBrace => write!(f, "}}"),
+			TokenType::Minus => write!(f, "-"),
+			TokenType::Plus => write!(f, "+"),
+			TokenType::Not => write!(f, "!"),
+			TokenType::NotEqual => write!(f, "!="),
+			TokenType::Equal => write!(f, "="),
+			TokenType::EqualEqual => write!(f, "=="),
+			TokenType::Greater => write!(f, ">"),
+			TokenType::GreaterEqual => write!(f, ">="),
+			TokenType::Less => write!(f, "<"),
+			TokenType::LessEqual => write!(f, "<="),
+			TokenType::String(s) => write!(f, "String<{}>", s),
+			TokenType::Integer(n) => write!(f, "Integer<{}>", n),
+			TokenType::Float(n) => write!(f, "Float<{}>", n),
+			_ => write!(f, "."),
+		}
+	}
 }
