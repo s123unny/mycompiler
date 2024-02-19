@@ -5,18 +5,28 @@ use std::io::{BufRead,BufReader};
 use std::iter::Peekable;
 use std::process;
 use std::fmt;
+use std::collections::HashMap;
 
 pub struct Scanner {
 	file_path: String,
 	f: BufReader<File>,
 	line: usize,
 	tokens: Vec<Token>,
+	keywords: HashMap<String, TokenType>,
 }
 
 impl Scanner {
 	pub fn new(file_path: &String) -> Self {
 		let f = BufReader::new(File::open(file_path).expect("Couldn't read file"));
-		let s = Self { file_path: file_path.clone(), f: f, line: 0, tokens: Vec::new()};
+		let mut keywords = HashMap::new();
+		let k = [TokenType::Def, TokenType::For, TokenType::If, TokenType::Else,
+			TokenType::While, TokenType::Null, TokenType::Return, TokenType::Var,
+			TokenType::I32, TokenType::I64, TokenType::F32, TokenType::F64, TokenType::Bool,
+			TokenType::True, TokenType::False];
+		for t in k.into_iter() {
+			keywords.insert(t.to_string(), t);
+		}
+		let s = Self { file_path: file_path.clone(), f: f, line: 0, tokens: Vec::new(), keywords};
 		s
 	}
 	pub fn scan_tokens(&mut self) {
@@ -68,7 +78,8 @@ impl Scanner {
 			' ' | '\t' | '\r' => {},
 			'"' => self.scan_string(chars),
 			n @ '0'..='9' => self.scan_number(chars, n),
-			_ => println!("todo {:?}", c),
+			c @ 'a'..='z' | c @ 'A'..='Z' | c @ '_' => self.scan_identifier(chars, c),
+			_ => self.error("Unexpected token")
 		}
 	}
 
@@ -140,6 +151,19 @@ impl Scanner {
 		}
 	}
 
+	fn scan_identifier(&mut self, chars: &mut Peekable<Chars<'_>>, c: char) {
+		let mut string = String::new();
+		string.push(c);
+		while let Some(c @ 'a'..='z' | c @ 'A'..='Z' | c @ '_' | c @ '0'..='9' ) = chars.peek() {
+			string.push(*c);
+			chars.next();
+		}
+		match self.keywords.get(&string) {
+			Some(t) =>	self.add_token(t.clone()),
+			_ => self.add_token(TokenType::Identifier(string)),
+		}
+	}
+
 	fn error(&self, m: &str) {
 		println!("{}:{} Error: {}", self.file_path, self.line, m);
 		process::exit(1);
@@ -152,12 +176,13 @@ impl Scanner {
 				line = token.line;
 				print!("\n{}: ", line);
 			}
-			print!("{} ", token);
+			print!("{} ", token.token);
 		}
 		println!("");
 	}
 }
 
+#[derive(Clone)]
 enum TokenType {
   // Single-character tokens.
   LeftParen, RightParen, LeftBrace, RightBrace,
@@ -175,7 +200,7 @@ enum TokenType {
 	Identifier(String),
 
   // Keywords.
-  Def, For, If, Else, While, Nil,
+  Def, For, If, Else, While, Null,
   Return, Var,
 	I32, I64, F32, F64, Bool,
 }
@@ -185,9 +210,9 @@ struct Token {
 	line: usize,
 }
 
-impl fmt::Display for Token {
+impl fmt::Display for TokenType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match &self.token {
+		match &self {
 			TokenType::LeftParen => write!(f, "("),
 			TokenType::RightParen => write!(f, ")"),
 			TokenType::LeftBrace => write!(f, "{{"),
@@ -205,6 +230,22 @@ impl fmt::Display for Token {
 			TokenType::String(s) => write!(f, "String<{}>", s),
 			TokenType::Integer(n) => write!(f, "Integer<{}>", n),
 			TokenType::Float(n) => write!(f, "Float<{}>", n),
+			TokenType::True => write!(f, "true"),
+			TokenType::False => write!(f, "false"),
+			TokenType::Identifier(s) => write!(f, "Identifier<{}>", s),
+			TokenType::Def => write!(f, "def"),
+			TokenType::For => write!(f, "for"),
+			TokenType::If => write!(f, "if"),
+			TokenType::Else => write!(f, "else"),
+			TokenType::While => write!(f, "while"),
+			TokenType::Null => write!(f, "null"),
+			TokenType::Return => write!(f, "return"),
+			TokenType::Var => write!(f, "var"),
+			TokenType::I32 => write!(f, "i32"),
+			TokenType::I64 => write!(f, "i64"),
+			TokenType::F32 => write!(f, "f32"),
+			TokenType::F64 => write!(f, "f64"),
+			TokenType::Bool => write!(f, "bool"),
 			_ => write!(f, "."),
 		}
 	}
