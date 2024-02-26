@@ -11,7 +11,7 @@ pub struct Scanner {
 	file_path: String,
 	f: BufReader<File>,
 	line: usize,
-	tokens: Vec<Token>,
+	pub tokens: Vec<Token>,
 	keywords: HashMap<String, TokenType>,
 }
 
@@ -59,6 +59,8 @@ impl Scanner {
 			'/' => self.add_token(TokenType::Slash),
 			'*' => self.add_token(TokenType::Star),
 			';' => self.add_token(TokenType::Semicolon),
+			':' => self.add_token(TokenType::Colon),
+			',' => self.add_token(TokenType::Comma),
 			'!' => {
 				let token = if self.expect(chars, '=') { TokenType::NotEqual } else { TokenType::Not };
 				self.add_token(token);
@@ -79,7 +81,7 @@ impl Scanner {
 			'"' => self.scan_string(chars),
 			n @ '0'..='9' => self.scan_number(chars, n),
 			c @ 'a'..='z' | c @ 'A'..='Z' | c @ '_' => self.scan_identifier(chars, c),
-			_ => self.error("Unexpected token")
+			_ => {print!("{}", c); self.error("Unexpected token")}
 		}
 	}
 
@@ -183,10 +185,10 @@ impl Scanner {
 }
 
 #[derive(Clone)]
-enum TokenType {
+pub enum TokenType {
   // Single-character tokens.
   LeftParen, RightParen, LeftBrace, RightBrace,
-  Minus, Plus, Slash, Star, Semicolon,
+  Minus, Plus, Slash, Star, Semicolon, Colon, Comma,
 
   // One or two character tokens.
   Not, NotEqual,
@@ -205,9 +207,9 @@ enum TokenType {
 	I32, I64, F32, F64, Bool,
 }
 
-struct Token {
-	token: TokenType,
-	line: usize,
+pub struct Token {
+	pub token: TokenType,
+	pub line: usize,
 }
 
 impl fmt::Display for TokenType {
@@ -219,6 +221,11 @@ impl fmt::Display for TokenType {
 			TokenType::RightBrace => write!(f, "}}"),
 			TokenType::Minus => write!(f, "-"),
 			TokenType::Plus => write!(f, "+"),
+			TokenType::Slash => write!(f, "/"),
+			TokenType::Star => write!(f, "*"),
+			TokenType::Semicolon => write!(f, ";"),
+			TokenType::Colon => write!(f, ":"),
+			TokenType::Comma => write!(f, ","),
 			TokenType::Not => write!(f, "!"),
 			TokenType::NotEqual => write!(f, "!="),
 			TokenType::Equal => write!(f, "="),

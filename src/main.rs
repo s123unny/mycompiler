@@ -1,4 +1,5 @@
 mod scanner;
+mod ast;
 
 use std::env;
 use std::process;
@@ -37,5 +38,6 @@ fn compile(config: Config) -> Result<(), Box<dyn Error>> {
 	scanner.scan_tokens();
 	scanner.print_tokens();
 
+	ast::parse_ast(&mut scanner.tokens);
 	Ok(())
 }
