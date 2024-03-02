@@ -1,5 +1,6 @@
 use crate::scanner::{Token,TokenType};
 use crate::ast::ParsingResult::{Good,Bad};
+use std::fmt;
 
 #[derive(Debug)]
 pub enum Expression {
@@ -12,14 +13,14 @@ pub enum Expression {
 pub enum Statement {
 	ExprStmt(Expression),
 	Block{stmts: Vec<Statement>},
-	VarDecl{variable: String, vtype: Option<TokenType>, expr: Expression},
-	AssignStmt{variable: Token, operator: Token, expr: Box<Expression>},
-	SelectionStmt{cond: Expression, if_stmt: Vec<Statement>, else_stmt: Option<Vec<Statement>>}
+	VarDecl{variable: String, vtype: Option<TokenType>, expr: Option<Expression>},
+	AssignStmt{variable: String, operator: TokenType, expr: Expression},
+	SelectionStmt{cond: Expression, if_stmt: Box<Statement>, else_stmt: Option<Box<Statement>>}
 }
 
 pub struct Function {
 	pub prototype: Prototype,
-  pub body: Vec<Statement>
+  pub body: Statement
 }
 
 pub struct Prototype {
@@ -93,10 +94,24 @@ macro_rules! peek {
 	}
 }
 
+macro_rules! peek_next {
+	($tokens:expr, $($token:pat),+) => {
+		if $tokens.len() > 2 {
+			match $tokens[$tokens.len()-2] {
+				$(Token{ token: $token, .. } => true,)+
+				_ => false
+			}
+		} else {
+			false
+		}
+	}
+}
+
 fn parse_function(tokens: &mut Vec<Token>) -> ParsingResult<Function> {
 	tokens.pop(); // pop Def token
 	let prototype = parse_try!(parse_prototype, tokens);
 	let body = parse_try!(parse_block, tokens);
+	println!("{}", body);
 	Good(Function{ prototype, body})
 }
 
@@ -128,7 +143,7 @@ fn parse_prototype(tokens: &mut Vec<Token>) -> ParsingResult<Prototype> {
 	Good(Prototype{ name, args, atypes })
 }
 
-fn parse_block(tokens: &mut Vec<Token>) -> ParsingResult<Vec<Statement>> {
+fn parse_block(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 	expect!(tokens, "expected '{' after prototype", [TokenType::LeftBrace, {}]);
 	let mut stmts = Vec::new();
 	while !peek!(tokens, TokenType::RightBrace) {
@@ -136,16 +151,16 @@ fn parse_block(tokens: &mut Vec<Token>) -> ParsingResult<Vec<Statement>> {
 		stmts.push(result);
 	}
 	expect!(tokens, "expected '}' after prototype", [TokenType::RightBrace, {}]);
-	Good(stmts)
+	Good( Statement::Block{stmts} )
 }
 
 fn parse_selection(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 	expect!(tokens, "expected 'if'", [TokenType::If, {}]);
 	let cond = parse_try!(parse_expr, tokens);
-	let if_stmt = parse_try!(parse_block, tokens);
+	let if_stmt = Box::new(parse_try!(parse_block, tokens));
 	let else_stmt = if peek!(tokens, TokenType::Else) {
 		expect!(tokens, "expected 'else'", [TokenType::Else, {}]);
-		Some(parse_try!(parse_block, tokens))
+		Some(Box::new(parse_try!(parse_block, tokens)))
 	} else {
 		None
 	};
@@ -167,19 +182,35 @@ fn parse_var_decl(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 	} else {
 		None
 	};
-	let expr = parse_try!(parse_expr, tokens);
+	let expr = if peek!(tokens, TokenType::Equal) {
+		expect!(tokens, "expected '='", [TokenType::Equal, {}]);
+		let e = parse_try!(parse_expr, tokens);
+		Some(e)
+	} else {
+		None
+	};
 	expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
 	Good( Statement::VarDecl{ variable, vtype, expr } )
 }
 
 fn parse_stmt(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 	let stmt = match tokens.last() {
-		Some(Token{ token: TokenType::LeftBrace, .. }) => {
-			let stmts = parse_try!(parse_block, tokens);
-			Statement::Block{stmts}
-		},
+		Some(Token{ token: TokenType::LeftBrace, .. }) => parse_try!(parse_block, tokens),
 		Some(Token{ token: TokenType::If, .. }) => parse_try!(parse_selection, tokens),
 		Some(Token{ token: TokenType::Var, .. }) => parse_try!(parse_var_decl, tokens),
+		Some(Token{ token: TokenType::Identifier(_), .. }) => {
+			if peek_next!(tokens, TokenType::Equal) {
+				let variable = expect!(tokens, "expected variable", [TokenType::Identifier(variable), variable]);
+				let operator = expect!(tokens, "expected '='", [TokenType::Equal, TokenType::Equal]);
+				let expr = parse_try!(parse_expr, tokens);
+				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
+				Statement::AssignStmt{ variable, operator, expr }
+			} else {
+				let expr = parse_try!(parse_expr, tokens);
+				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
+				Statement::ExprStmt(expr)
+			}
+		}
 		_ => {
 			let expr = parse_try!(parse_expr, tokens);
 			expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
@@ -250,4 +281,49 @@ fn parse_primary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 	]);
 	println!("primary {:?}", expr);
 	Good(expr)
+}
+
+impl fmt::Display for Expression {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match &self {
+			Expression::LiteralExpr(t) | Expression::VaraibleExpr(t) => write!(f, "{}", t),
+			Expression::BinaryExpr{left, operator, right} => write!(f, "({} {} {})", operator.token, left, right),
+			Expression::UnaryExpr{operator, right} => write!(f, "({} {})", operator.token, right),
+		}
+	}
+}
+
+impl fmt::Display for Statement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match &self {
+			Statement::ExprStmt(e) => write!(f, "{e}"),
+			Statement::Block{stmts} => {
+				write!(f, "{{\n")?;
+				for s in stmts {
+					write!(f, "{s}")?;
+				}
+				write!(f, "}}\n")
+			},
+			Statement::VarDecl{variable, vtype, expr} => {
+				write!(f, "{}", variable)?;
+				if let Some(vt) = vtype {
+					write!(f, " : {}", vt)?;
+				}
+				if let Some(e) = expr {
+					write!(f, " = {}", e)?;
+				}
+				write!(f, "\n")
+			},
+			Statement::AssignStmt{variable, operator, expr} => {
+				write!(f, "{} {} {}\n", variable, operator, expr)
+			},
+			Statement::SelectionStmt{cond, if_stmt, else_stmt} => {
+				write!(f, "if {} {}", cond, if_stmt)?;
+				if let Some(e) = else_stmt {
+					write!(f, "else {}", e)?;
+				}
+				Ok(())
+			},
+		}
+	}
 }
