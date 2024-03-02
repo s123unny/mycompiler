@@ -185,6 +185,7 @@ impl Scanner {
 }
 
 #[derive(Clone)]
+#[derive(Debug)]
 pub enum TokenType {
   // Single-character tokens.
   LeftParen, RightParen, LeftBrace, RightBrace,
@@ -206,7 +207,7 @@ pub enum TokenType {
   Return, Var,
 	I32, I64, F32, F64, Bool,
 }
-
+#[derive(Debug)]
 pub struct Token {
 	pub token: TokenType,
 	pub line: usize,
