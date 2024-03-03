@@ -4,8 +4,8 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum Expression {
-	LiteralExpr(TokenType),
-	VaraibleExpr(TokenType),
+	LiteralExpr(Token),
+	VaraibleExpr(Token),
 	BinaryExpr{left: Box<Expression>, operator: Token, right: Box<Expression>},
 	UnaryExpr{operator: Token, right: Box<Expression>},
 }
@@ -13,8 +13,8 @@ pub enum Expression {
 pub enum Statement {
 	ExprStmt(Expression),
 	Block{stmts: Vec<Statement>},
-	VarDecl{variable: String, vtype: Option<TokenType>, expr: Option<Expression>},
-	AssignStmt{variable: String, operator: TokenType, expr: Expression},
+	VarDecl{variable: Token, vtype: Option<TokenType>, expr: Option<Expression>},
+	AssignStmt{variable: Token, operator: Token, expr: Expression},
 	SelectionStmt{cond: Expression, if_stmt: Box<Statement>, else_stmt: Option<Box<Statement>>}
 }
 
@@ -61,10 +61,11 @@ fn error<T>(m: &str) -> ParsingResult<T> {
 }
 
 macro_rules! expect {
-	($tokens: expr, $error:expr, [$($token:pat, $result:stmt);+]) => (
+	($tokens: expr, $error:expr, [$($token:pat, $line:ident, $result:stmt);+]) => (
 		match $tokens.pop() {
 			$(
-				Some(Token{ token:$token, .. }) => {
+				Some(Token{ token:$token, line: $line }) => {
+					let _ = $line; // To avoid unused variable warning
 					$result
 				},
 			)+
@@ -116,8 +117,8 @@ fn parse_function(tokens: &mut Vec<Token>) -> ParsingResult<Function> {
 }
 
 fn parse_prototype(tokens: &mut Vec<Token>) -> ParsingResult<Prototype> {
-	let name = expect!(tokens, "expected function name in prototype", [TokenType::Identifier(name), name]);
-	expect!(tokens, "expected '(' in prototype", [TokenType::LeftParen, true]);
+	let name = expect!(tokens, "expected function name in prototype", [TokenType::Identifier(name), line, name]);
+	expect!(tokens, "expected '(' in prototype", [TokenType::LeftParen, line, true]);
 	let mut args = Vec::new();
 	let mut atypes = Vec::new();
 	if peek!(tokens, TokenType::RightParen) {
@@ -126,40 +127,40 @@ fn parse_prototype(tokens: &mut Vec<Token>) -> ParsingResult<Prototype> {
 	}
 	loop {
 		expect!(tokens, "expected identifier in prototype", [
-			TokenType::Identifier(arg), args.push(arg.clone())
+			TokenType::Identifier(arg), line, args.push(arg.clone())
 		]);
-		expect!(tokens, "expected ':' in prototype", [TokenType::Colon, {}]);
+		expect!(tokens, "expected ':' in prototype", [TokenType::Colon, line, {}]);
 		expect!(tokens, "expected type in prototype", [
-			TokenType::I32, atypes.push(TokenType::I32);
-			TokenType::I64, atypes.push(TokenType::I64);
-			TokenType::F32, atypes.push(TokenType::F32);
-			TokenType::F64, atypes.push(TokenType::F64)
+			TokenType::I32, line, atypes.push(TokenType::I32);
+			TokenType::I64, line, atypes.push(TokenType::I64);
+			TokenType::F32, line, atypes.push(TokenType::F32);
+			TokenType::F64, line, atypes.push(TokenType::F64)
 		]);
 		expect!(tokens, "expected ')' in prototype", [
-			TokenType::Comma, continue;
-			TokenType::RightParen, break
+			TokenType::Comma, line, continue;
+			TokenType::RightParen, line, break
 		]);
 	}
 	Good(Prototype{ name, args, atypes })
 }
 
 fn parse_block(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
-	expect!(tokens, "expected '{' after prototype", [TokenType::LeftBrace, {}]);
+	expect!(tokens, "expected '{' after prototype", [TokenType::LeftBrace, line, {}]);
 	let mut stmts = Vec::new();
 	while !peek!(tokens, TokenType::RightBrace) {
 		let result = parse_try!(parse_stmt, tokens);
 		stmts.push(result);
 	}
-	expect!(tokens, "expected '}' after prototype", [TokenType::RightBrace, {}]);
+	expect!(tokens, "expected '}' after prototype", [TokenType::RightBrace, line, {}]);
 	Good( Statement::Block{stmts} )
 }
 
 fn parse_selection(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
-	expect!(tokens, "expected 'if'", [TokenType::If, {}]);
+	expect!(tokens, "expected 'if'", [TokenType::If, line, {}]);
 	let cond = parse_try!(parse_expr, tokens);
 	let if_stmt = Box::new(parse_try!(parse_block, tokens));
 	let else_stmt = if peek!(tokens, TokenType::Else) {
-		expect!(tokens, "expected 'else'", [TokenType::Else, {}]);
+		expect!(tokens, "expected 'else'", [TokenType::Else, line, {}]);
 		Some(Box::new(parse_try!(parse_block, tokens)))
 	} else {
 		None
@@ -168,28 +169,30 @@ fn parse_selection(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 }
 
 fn parse_var_decl(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
-	expect!(tokens, "expected 'var'", [TokenType::Var, {}]);
-	let variable = expect!(tokens, "expected variable", [TokenType::Identifier(variable), variable]);
+	expect!(tokens, "expected 'var'", [TokenType::Var, line, {}]);
+	let variable = expect!(tokens, "expected variable", [
+		TokenType::Identifier(variable), line, Token{token: TokenType::Identifier(variable), line}
+	]);
 	let vtype = if peek!(tokens, TokenType::Colon) {
-		expect!(tokens, "expected ':'", [TokenType::Colon, {}]);
+		expect!(tokens, "expected ':'", [TokenType::Colon, line, {}]);
 		let v = expect!(tokens, "expected type after ':", [
-			TokenType::I32, TokenType::I32;
-			TokenType::I64, TokenType::I64;
-			TokenType::F32, TokenType::F32;
-			TokenType::F64, TokenType::F64
+			TokenType::I32, line, TokenType::I32;
+			TokenType::I64, line, TokenType::I64;
+			TokenType::F32, line, TokenType::F32;
+			TokenType::F64, line, TokenType::F64
 		]);
 		Some(v)
 	} else {
 		None
 	};
 	let expr = if peek!(tokens, TokenType::Equal) {
-		expect!(tokens, "expected '='", [TokenType::Equal, {}]);
+		expect!(tokens, "expected '='", [TokenType::Equal, line, {}]);
 		let e = parse_try!(parse_expr, tokens);
 		Some(e)
 	} else {
 		None
 	};
-	expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
+	expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
 	Good( Statement::VarDecl{ variable, vtype, expr } )
 }
 
@@ -200,20 +203,20 @@ fn parse_stmt(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 		Some(Token{ token: TokenType::Var, .. }) => parse_try!(parse_var_decl, tokens),
 		Some(Token{ token: TokenType::Identifier(_), .. }) => {
 			if peek_next!(tokens, TokenType::Equal) {
-				let variable = expect!(tokens, "expected variable", [TokenType::Identifier(variable), variable]);
-				let operator = expect!(tokens, "expected '='", [TokenType::Equal, TokenType::Equal]);
+				let variable = tokens.pop().expect("expected token");
+				let operator = tokens.pop().expect("expected token");
 				let expr = parse_try!(parse_expr, tokens);
-				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
+				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
 				Statement::AssignStmt{ variable, operator, expr }
 			} else {
 				let expr = parse_try!(parse_expr, tokens);
-				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
+				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
 				Statement::ExprStmt(expr)
 			}
 		}
 		_ => {
 			let expr = parse_try!(parse_expr, tokens);
-			expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, {}]);
+			expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
 			Statement::ExprStmt(expr)
 		}
 	};
@@ -266,16 +269,16 @@ fn parse_unary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 
 fn parse_primary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 	let expr = expect!(tokens, "expected expression", [
-		TokenType::String(t), Expression::LiteralExpr(TokenType::String(t));
-		TokenType::Integer(t), Expression::LiteralExpr(TokenType::Integer(t));
-		TokenType::Float(t), Expression::LiteralExpr(TokenType::Float(t));
-		TokenType::True, Expression::LiteralExpr(TokenType::True);
-		TokenType::False, Expression::LiteralExpr(TokenType::False);
-		TokenType::Null, Expression::LiteralExpr(TokenType::Null);
-		TokenType::Identifier(t), Expression::VaraibleExpr(TokenType::Identifier(t));
-		TokenType::LeftBrace, {
+		TokenType::String(t), line, Expression::LiteralExpr(Token{token: TokenType::String(t), line});
+		TokenType::Integer(t), line, Expression::LiteralExpr(Token{token: TokenType::Integer(t), line});
+		TokenType::Float(t), line, Expression::LiteralExpr(Token{token: TokenType::Float(t), line});
+		TokenType::True, line, Expression::LiteralExpr(Token{token: TokenType::True, line});
+		TokenType::False, line, Expression::LiteralExpr(Token{token: TokenType::False, line});
+		TokenType::Null, line, Expression::LiteralExpr(Token{token: TokenType::Null, line});
+		TokenType::Identifier(t), line, Expression::VaraibleExpr(Token{token: TokenType::Identifier(t), line});
+		TokenType::LeftBrace, line, {
 			let expr = parse_try!(parse_expr, tokens);
-			expect!(tokens, "expected ')' after expression", [TokenType::RightBrace, {}]);
+			expect!(tokens, "expected ')' after expression", [TokenType::RightBrace, line, {}]);
 			expr
 		}
 	]);
@@ -286,7 +289,7 @@ fn parse_primary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 impl fmt::Display for Expression {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self {
-			Expression::LiteralExpr(t) | Expression::VaraibleExpr(t) => write!(f, "{}", t),
+			Expression::LiteralExpr(t) | Expression::VaraibleExpr(t) => write!(f, "{}", t.token),
 			Expression::BinaryExpr{left, operator, right} => write!(f, "({} {} {})", operator.token, left, right),
 			Expression::UnaryExpr{operator, right} => write!(f, "({} {})", operator.token, right),
 		}
@@ -305,7 +308,7 @@ impl fmt::Display for Statement {
 				write!(f, "}}\n")
 			},
 			Statement::VarDecl{variable, vtype, expr} => {
-				write!(f, "{}", variable)?;
+				write!(f, "{}", variable.token)?;
 				if let Some(vt) = vtype {
 					write!(f, " : {}", vt)?;
 				}
@@ -315,7 +318,7 @@ impl fmt::Display for Statement {
 				write!(f, "\n")
 			},
 			Statement::AssignStmt{variable, operator, expr} => {
-				write!(f, "{} {} {}\n", variable, operator, expr)
+				write!(f, "{} {} {}\n", variable.token, operator.token, expr)
 			},
 			Statement::SelectionStmt{cond, if_stmt, else_stmt} => {
 				write!(f, "if {} {}", cond, if_stmt)?;
