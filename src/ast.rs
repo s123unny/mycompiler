@@ -55,24 +55,28 @@ enum ParsingResult<T> {
 	Bad
 }
 
-fn error<T>(m: &str) -> ParsingResult<T> {
-	println!("Error: {}", m);
+fn error<T>(m: &str, found: Option<Token>) -> ParsingResult<T> {
+	match found {
+		Some(t) => println!("file:{}:{}: {}, found {}", t.source.line, t.source.col, m, t.token),
+		None => println!("file: {}", m),
+	}
 	Bad
 }
 
 macro_rules! expect {
-	($tokens: expr, $error:expr, [$($token:pat, $line:ident, $result:stmt);+]) => (
+	($tokens: expr, $error:expr, [$($token:pat, $source:ident, $result:stmt);+]) => (
 		match $tokens.pop() {
 			$(
-				Some(Token{ token:$token, line: $line }) => {
-					let _ = $line; // To avoid unused variable warning
+				Some(Token{ token:$token, source: $source }) => {
+					let _ = $source; // To avoid unused variable warning
 					$result
 				},
 			)+
-			y => {
+			Some(y) => {
 				println!("{:?}", y);
-				return error($error)
+				return error($error, Some(y))
 			}
+			None => return error($error, None)
 		}
 	);
 }
@@ -117,8 +121,8 @@ fn parse_function(tokens: &mut Vec<Token>) -> ParsingResult<Function> {
 }
 
 fn parse_prototype(tokens: &mut Vec<Token>) -> ParsingResult<Prototype> {
-	let name = expect!(tokens, "expected function name in prototype", [TokenType::Identifier(name), line, name]);
-	expect!(tokens, "expected '(' in prototype", [TokenType::LeftParen, line, true]);
+	let name = expect!(tokens, "expected function name in prototype", [TokenType::Identifier(name), source, name]);
+	expect!(tokens, "expected '(' in prototype", [TokenType::LeftParen, source, true]);
 	let mut args = Vec::new();
 	let mut atypes = Vec::new();
 	if peek!(tokens, TokenType::RightParen) {
@@ -127,40 +131,40 @@ fn parse_prototype(tokens: &mut Vec<Token>) -> ParsingResult<Prototype> {
 	}
 	loop {
 		expect!(tokens, "expected identifier in prototype", [
-			TokenType::Identifier(arg), line, args.push(arg.clone())
+			TokenType::Identifier(arg), source, args.push(arg.clone())
 		]);
-		expect!(tokens, "expected ':' in prototype", [TokenType::Colon, line, {}]);
+		expect!(tokens, "expected ':' in prototype", [TokenType::Colon, source, {}]);
 		expect!(tokens, "expected type in prototype", [
-			TokenType::I32, line, atypes.push(TokenType::I32);
-			TokenType::I64, line, atypes.push(TokenType::I64);
-			TokenType::F32, line, atypes.push(TokenType::F32);
-			TokenType::F64, line, atypes.push(TokenType::F64)
+			TokenType::I32, source, atypes.push(TokenType::I32);
+			TokenType::I64, source, atypes.push(TokenType::I64);
+			TokenType::F32, source, atypes.push(TokenType::F32);
+			TokenType::F64, source, atypes.push(TokenType::F64)
 		]);
 		expect!(tokens, "expected ')' in prototype", [
-			TokenType::Comma, line, continue;
-			TokenType::RightParen, line, break
+			TokenType::Comma, source, continue;
+			TokenType::RightParen, source, break
 		]);
 	}
 	Good(Prototype{ name, args, atypes })
 }
 
 fn parse_block(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
-	expect!(tokens, "expected '{' after prototype", [TokenType::LeftBrace, line, {}]);
+	expect!(tokens, "expected '{' after prototype", [TokenType::LeftBrace, source, {}]);
 	let mut stmts = Vec::new();
 	while !peek!(tokens, TokenType::RightBrace) {
 		let result = parse_try!(parse_stmt, tokens);
 		stmts.push(result);
 	}
-	expect!(tokens, "expected '}' after prototype", [TokenType::RightBrace, line, {}]);
+	expect!(tokens, "expected '}' after prototype", [TokenType::RightBrace, source, {}]);
 	Good( Statement::Block{stmts} )
 }
 
 fn parse_selection(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
-	expect!(tokens, "expected 'if'", [TokenType::If, line, {}]);
+	expect!(tokens, "expected 'if'", [TokenType::If, source, {}]);
 	let cond = parse_try!(parse_expr, tokens);
 	let if_stmt = Box::new(parse_try!(parse_block, tokens));
 	let else_stmt = if peek!(tokens, TokenType::Else) {
-		expect!(tokens, "expected 'else'", [TokenType::Else, line, {}]);
+		expect!(tokens, "expected 'else'", [TokenType::Else, source, {}]);
 		Some(Box::new(parse_try!(parse_block, tokens)))
 	} else {
 		None
@@ -169,30 +173,30 @@ fn parse_selection(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 }
 
 fn parse_var_decl(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
-	expect!(tokens, "expected 'var'", [TokenType::Var, line, {}]);
+	expect!(tokens, "expected 'var'", [TokenType::Var, source, {}]);
 	let variable = expect!(tokens, "expected variable", [
-		TokenType::Identifier(variable), line, Token{token: TokenType::Identifier(variable), line}
+		TokenType::Identifier(variable), source, Token{token: TokenType::Identifier(variable), source}
 	]);
 	let vtype = if peek!(tokens, TokenType::Colon) {
-		expect!(tokens, "expected ':'", [TokenType::Colon, line, {}]);
+		expect!(tokens, "expected ':'", [TokenType::Colon, source, {}]);
 		let v = expect!(tokens, "expected type after ':", [
-			TokenType::I32, line, TokenType::I32;
-			TokenType::I64, line, TokenType::I64;
-			TokenType::F32, line, TokenType::F32;
-			TokenType::F64, line, TokenType::F64
+			TokenType::I32, source, TokenType::I32;
+			TokenType::I64, source, TokenType::I64;
+			TokenType::F32, source, TokenType::F32;
+			TokenType::F64, source, TokenType::F64
 		]);
 		Some(v)
 	} else {
 		None
 	};
 	let expr = if peek!(tokens, TokenType::Equal) {
-		expect!(tokens, "expected '='", [TokenType::Equal, line, {}]);
+		expect!(tokens, "expected '='", [TokenType::Equal, source, {}]);
 		let e = parse_try!(parse_expr, tokens);
 		Some(e)
 	} else {
 		None
 	};
-	expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
+	expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, source, {}]);
 	Good( Statement::VarDecl{ variable, vtype, expr } )
 }
 
@@ -206,17 +210,17 @@ fn parse_stmt(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 				let variable = tokens.pop().expect("expected token");
 				let operator = tokens.pop().expect("expected token");
 				let expr = parse_try!(parse_expr, tokens);
-				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
+				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, source, {}]);
 				Statement::AssignStmt{ variable, operator, expr }
 			} else {
 				let expr = parse_try!(parse_expr, tokens);
-				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
+				expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, source, {}]);
 				Statement::ExprStmt(expr)
 			}
 		}
 		_ => {
 			let expr = parse_try!(parse_expr, tokens);
-			expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, line, {}]);
+			expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, source, {}]);
 			Statement::ExprStmt(expr)
 		}
 	};
@@ -269,16 +273,16 @@ fn parse_unary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 
 fn parse_primary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 	let expr = expect!(tokens, "expected expression", [
-		TokenType::String(t), line, Expression::LiteralExpr(Token{token: TokenType::String(t), line});
-		TokenType::Integer(t), line, Expression::LiteralExpr(Token{token: TokenType::Integer(t), line});
-		TokenType::Float(t), line, Expression::LiteralExpr(Token{token: TokenType::Float(t), line});
-		TokenType::True, line, Expression::LiteralExpr(Token{token: TokenType::True, line});
-		TokenType::False, line, Expression::LiteralExpr(Token{token: TokenType::False, line});
-		TokenType::Null, line, Expression::LiteralExpr(Token{token: TokenType::Null, line});
-		TokenType::Identifier(t), line, Expression::VaraibleExpr(Token{token: TokenType::Identifier(t), line});
-		TokenType::LeftBrace, line, {
+		TokenType::String(t), source, Expression::LiteralExpr(Token{token: TokenType::String(t), source});
+		TokenType::Integer(t), source, Expression::LiteralExpr(Token{token: TokenType::Integer(t), source});
+		TokenType::Float(t), source, Expression::LiteralExpr(Token{token: TokenType::Float(t), source});
+		TokenType::True, source, Expression::LiteralExpr(Token{token: TokenType::True, source});
+		TokenType::False, source, Expression::LiteralExpr(Token{token: TokenType::False, source});
+		TokenType::Null, source, Expression::LiteralExpr(Token{token: TokenType::Null, source});
+		TokenType::Identifier(t), source, Expression::VaraibleExpr(Token{token: TokenType::Identifier(t), source});
+		TokenType::LeftBrace, source, {
 			let expr = parse_try!(parse_expr, tokens);
-			expect!(tokens, "expected ')' after expression", [TokenType::RightBrace, line, {}]);
+			expect!(tokens, "expected ')' after expression", [TokenType::RightBrace, source, {}]);
 			expr
 		}
 	]);
