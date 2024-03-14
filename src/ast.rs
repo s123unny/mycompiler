@@ -1,6 +1,7 @@
 use crate::scanner::{Token,TokenType};
 use crate::ast::ParsingResult::{Good,Bad};
 use std::fmt;
+use std::process;
 
 #[derive(Debug)]
 pub enum Expression {
@@ -29,11 +30,11 @@ pub struct Prototype {
 	pub atypes: Vec<TokenType>,
 }
 
-enum AstNode {
+pub enum AstNode {
 	FunctionNode(Function),
 }
 
-pub fn parse_ast(tokens: &mut Vec<Token>) {
+pub fn parse_ast(tokens: &mut Vec<Token>) -> Vec<AstNode> {
 	tokens.reverse();
 
 	let mut ast: Vec<AstNode> = Vec::new();
@@ -45,9 +46,10 @@ pub fn parse_ast(tokens: &mut Vec<Token>) {
 		};
 		match result {
 			Good(function) => ast.push(AstNode::FunctionNode(function)),
-			Bad => break
+			Bad => process::exit(1),
 		}
 	}
+	ast
 }
 
 enum ParsingResult<T> {
