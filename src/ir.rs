@@ -11,7 +11,6 @@ pub struct Compiler<'a> {
 	context: &'a Context,
 	builder: Builder<'a>,
   module: Module<'a>,
-	// variables: HashMap<String, PointerValue<'a>>,
 	variables: VarEnv<'a>,
 	fn_val: Option<FunctionValue<'a>>,
 }
@@ -25,21 +24,22 @@ pub struct Compiler<'a> {
 // 	}
 // }
 
-impl<'a> Compiler<'a> {
-	pub fn compile(context: &Context, ast: Vec<AstNode>) {
-		let mut compiler = Compiler {
+impl <'a>Compiler<'a> {
+	pub fn new(context: &'a Context) -> Compiler<'a> {
+		Compiler {
 			context,
 			builder: context.create_builder(),
 			module: context.create_module("my_module"),
-			// variables: HashMap::new(),
 			variables: VarEnv::new(),
 			fn_val: None
-		};
+		}
+	}
+	pub fn compile(& mut self, ast: Vec<AstNode>) {
 		for node in ast {
 			let AstNode::FunctionNode(func) = node;
-			compiler.visit_func(&func);
+			self.visit_func(&func);
 		}
-		compiler.module.get_functions().map(|f| f.print_to_stderr());
+		self.module.get_functions().map(|f| f.print_to_stderr());
 	}
 	fn visit_func(&mut self, func: &Function) -> Result<FunctionValue, &str> {
 		let args_types = func.prototype.atypes.iter().map(|v| { match v {
@@ -67,13 +67,8 @@ impl<'a> Compiler<'a> {
 			let alloca = self.create_entry_block_alloca(arg_name);
 
 			self.builder.build_store(alloca, arg).unwrap();
-			// let alloca = self.context.f64_type().ptr_type(AddressSpace::default()).const_zero();
 
 			self.variables.insert(func.prototype.args[i].clone(), alloca);
-			// let VarEnv::Vars(ref mut cur, _) = self.variables else {
-			// 	panic!("VarEnv is Nil");
-			// };
-			// cur.insert(func.prototype.args[i].clone(), alloca);
 		}
 
 		let _body = self.visit_stmt(&func.body);
@@ -98,7 +93,7 @@ impl<'a> Compiler<'a> {
 	fn visit_stmt(&self, stmt: &Statement) -> Result<(), &str> {
 		match stmt {
 			Statement::ExprStmt(expr) => self.visit_expr(expr, None),
-			_ => panic!("todo visit_stmt"),
+			_ => panic!("todo visit_stmt {:?}", stmt),
 		};
 		Ok(())
 	}
@@ -137,7 +132,7 @@ impl<'a> Compiler<'a> {
 		}
 	}
 
-	fn build_load(&self, ptr: PointerValue<'a>, name: &str) -> BasicValueEnum<'a> {
+	fn build_load(&self, ptr: PointerValue<'a>, name: &str) -> BasicValueEnum {
 		self.builder.build_load(ptr.get_type(), ptr, name).unwrap()
 	}
 
@@ -156,11 +151,12 @@ enum VarEnv<'a> {
 	Nil,
 }
 
-impl VarEnv<'_> {
-	fn new() -> VarEnv<'static> {
+impl <'a>VarEnv<'a> {
+	fn new() -> VarEnv<'a> {
 		VarEnv::Vars(HashMap::new(), Box::new(VarEnv::Nil))
 	}
-	fn insert(&mut self, name: String, value: PointerValue) {
+
+	fn insert(&mut self, name: String, value: PointerValue<'a>) {
 		let VarEnv::Vars(ref mut cur, _) = self else {
 			panic!("VarEnv is Nil");
 		};

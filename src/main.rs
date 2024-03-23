@@ -1,9 +1,11 @@
 mod scanner;
 mod ast;
+mod ir;
 
 use std::env;
 use std::process;
 use std::error::Error;
+use inkwell::context::Context;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,6 +40,9 @@ fn compile(config: Config) -> Result<(), Box<dyn Error>> {
 	scanner.scan_tokens();
 	scanner.print_tokens();
 
-	ast::parse_ast(&mut scanner.tokens);
+	let ast = ast::parse_ast(&mut scanner.tokens);
+	let context = Context::create();
+	let mut compiler = ir::Compiler::new(&context);
+	compiler.compile(ast);
 	Ok(())
 }
