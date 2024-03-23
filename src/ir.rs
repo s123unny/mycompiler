@@ -39,7 +39,8 @@ impl <'a>Compiler<'a> {
 			let AstNode::FunctionNode(func) = node;
 			self.visit_func(&func);
 		}
-		self.module.get_functions().map(|f| f.print_to_stderr());
+		println!("complete compile");
+		self.module.print_to_stderr();
 	}
 	fn visit_func(&mut self, func: &Function) -> Result<FunctionValue, &str> {
 		let args_types = func.prototype.atypes.iter().map(|v| { match v {
@@ -92,7 +93,20 @@ impl <'a>Compiler<'a> {
 
 	fn visit_stmt(&self, stmt: &Statement) -> Result<(), &str> {
 		match stmt {
-			Statement::ExprStmt(expr) => self.visit_expr(expr, None),
+			Statement::ExprStmt(expr) => {
+				let _ = self.visit_expr(expr, None);
+			},
+			Statement::Block{stmts} => {
+				stmts.iter().map(|s| self.visit_stmt(s));
+			},
+			Statement::AssignStmt{variable, operator: _, expr} => {
+				let r = self.visit_expr(expr, None).expect("expect result");
+				let TokenType::Identifier(ref var_name) = variable.token else {
+					panic!("not an identifier");
+				};
+				let var = self.variables.get(&var_name).ok_or("Undefined variable.")?;
+				self.builder.build_store(*var, r).unwrap();
+			}
 			_ => panic!("todo visit_stmt {:?}", stmt),
 		};
 		Ok(())
