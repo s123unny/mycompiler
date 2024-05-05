@@ -4,7 +4,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{FunctionValue,PointerValue,BasicValueEnum};
 use inkwell::types::{BasicMetadataTypeEnum,BasicTypeEnum};
-use inkwell::FloatPredicate;
+use inkwell::IntPredicate;
 use crate::scanner::TokenType;
 use crate::ast::{AstNode,Function,Statement,Expression};
 
@@ -67,7 +67,7 @@ impl <'a>Compiler<'a> {
 
 			self.builder.build_store(alloca, arg).unwrap();
 
-			self.variables.insert(func.prototype.args[i].clone(), alloca);
+			self.variables.insert(func.prototype.args[i].clone(), alloca, arg.get_type());
 		}
 
 		let _body = self.visit_stmt(&func.body);
@@ -137,7 +137,7 @@ impl <'a>Compiler<'a> {
 
 				self.builder.build_store(alloca, var_val).unwrap();
 
-				self.variables.insert(var_name.clone(), alloca);
+				self.variables.insert(var_name.clone(), alloca, var_val.get_type());
 			},
 			Statement::AssignStmt{variable, operator: _, expr} => {
 				let r = self.visit_expr(expr).expect("expect result");
@@ -145,14 +145,15 @@ impl <'a>Compiler<'a> {
 					panic!("not an identifier");
 				};
 				let var = self.variables.get(&var_name).ok_or("Undefined variable.")?;
-				self.builder.build_store(*var, r).unwrap();
+				// todo: check type
+				self.builder.build_store(var.pos, r).unwrap();
 			}
 			Statement::SelectionStmt{cond, if_stmt, else_stmt} => {
 				let parent = self.fn_val.expect("expect FunctionValue");
-				let zero_const = self.context.f64_type().const_float(0.0);
 
-				let cond = self.visit_expr(cond)?.into_float_value();
-				let cond = self.builder.build_float_compare(FloatPredicate::ONE, cond, zero_const, "id_cond").unwrap();
+				let zero_const = self.context.i64_type().const_int(0, false);
+				let cond = self.visit_expr(cond)?.into_int_value();
+				let cond = self.builder.build_int_compare(IntPredicate::NE, cond, zero_const, "id_cond").unwrap();
 
 				let then_bb = self.context.append_basic_block(parent, "then");
 				let else_bb = self.context.append_basic_block(parent, "else");
@@ -201,7 +202,7 @@ impl <'a>Compiler<'a> {
 					panic!("not identifier");
 				};
 				match self.variables.get(&name) {
-					Some(v) => Ok(self.build_load(*v, name.as_str())),
+					Some(v) => Ok(self.build_load(v.vtype, v.pos, name.as_str())),
 					// Some(v) => Ok(self.builder.build_load(v.get_type(), *v, name.as_str()).unwrap()),
 					None => Err("Could not find a matching variable"),
 				}
@@ -217,8 +218,8 @@ impl <'a>Compiler<'a> {
 		}
 	}
 
-	fn build_load(&self, ptr: PointerValue<'a>, name: &str) -> BasicValueEnum<'a> {
-		self.builder.build_load(ptr.get_type(), ptr, name).unwrap()
+	fn build_load(&self, vtype: BasicTypeEnum<'a>, ptr: PointerValue<'a>, name: &str) -> BasicValueEnum<'a> {
+		self.builder.build_load(vtype, ptr, name).unwrap()
 	}
 
 	fn type_check(&self, val: BasicValueEnum<'a>, expect_type: &Option<TokenType>) -> Result<BasicValueEnum<'a>, &'static str> {
@@ -264,9 +265,14 @@ impl <'a>Compiler<'a> {
 	}
 }
 
-#[derive(PartialEq)]
+struct VarInfo<'a> {
+	pos: PointerValue<'a>,
+	vtype: BasicTypeEnum<'a>
+}
+
+//#[derive(PartialEq)]
 enum VarEnv<'a> {
-	Vars(HashMap<String, PointerValue<'a>>, Box<VarEnv<'a>>),
+	Vars(HashMap<String, VarInfo<'a>>, Box<VarEnv<'a>>),
 	Nil,
 }
 
@@ -275,14 +281,14 @@ impl <'a>VarEnv<'a> {
 		VarEnv::Vars(HashMap::new(), Box::new(VarEnv::Nil))
 	}
 
-	fn insert(&mut self, name: String, value: PointerValue<'a>) {
+	fn insert(&mut self, name: String, pos: PointerValue<'a>, vtype: BasicTypeEnum<'a>) {
 		let VarEnv::Vars(ref mut cur, _) = self else {
 			panic!("VarEnv is Nil");
 		};
-		cur.insert(name, value);
+		cur.insert(name, VarInfo{pos, vtype});
 	}
 
-	fn get(&self, name: &str) -> Option<&PointerValue<'a>> {
+	fn get(&self, name: &str) -> Option<&VarInfo<'a>> {
 		match self {
 			VarEnv::Vars(cur, ref parent) => {
 				match cur.get(name) {
