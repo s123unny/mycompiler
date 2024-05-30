@@ -57,12 +57,11 @@ fn run_passes_on(module: &Module) {
 			.unwrap();
 
 	let passes: &[&str] = &[
-			// "instcombine",
-			// "reassociate",
-			// "gvn",
+			"instcombine",
+			"reassociate",
+			"gvn",
 			"simplifycfg",
-			// "basic-aa",
-			// "mem2reg",
+			"mem2reg",
 	];
 
 	module
@@ -81,6 +80,9 @@ fn compile(config: Config) -> Result<(), Box<dyn Error>> {
 	compiler.compile(ast);
 	compiler.module.verify()?;
 	run_passes_on(&compiler.module);
+
+	println!("After passes");
+	compiler.module.print_to_stderr();
 
 	let ee = compiler.module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
 	let maybe_fn = unsafe { ee.get_function::<unsafe extern "C" fn() -> i64>("main") };

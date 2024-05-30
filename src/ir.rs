@@ -16,15 +16,6 @@ pub struct Compiler<'a> {
 	fn_val: Option<FunctionValue<'a>>,
 }
 
-// macro_rules! build_expr {
-// 	($opr:ident, $ttype:expr, $($args:expr),+) => {
-// 		match $ttype {
-// 			TokenType::Integer(_) => self.builder.build_int_$opr($($args),+)
-// 		}
-		
-// 	}
-// }
-
 impl <'a>Compiler<'a> {
 	pub fn new(context: &'a Context) -> Compiler<'a> {
 		Compiler {
@@ -219,7 +210,6 @@ impl <'a>Compiler<'a> {
 				};
 				match self.variables.get(&name) {
 					Some(v) => Ok(self.build_load(v.vtype, v.pos, name.as_str())),
-					// Some(v) => Ok(self.builder.build_load(v.get_type(), *v, name.as_str()).unwrap()),
 					None => Err("Could not find a matching variable"),
 				}
 			},
@@ -244,8 +234,25 @@ impl <'a>Compiler<'a> {
 					},
 					_ => Err("Not supported type"),
 				}
+			},
+			Expression::UnaryExpr{operator, right} => {
+				let rhs = self.visit_expr(right)?;
+				let vtype = rhs.get_type();
+				match vtype {
+					BasicTypeEnum::IntType(_) => {
+						let rhs = rhs.into_int_value();
+						match operator.token {
+							TokenType::Not => Ok(self.builder.build_not(rhs, "not").unwrap().into()),
+							TokenType::Minus => Ok(self.builder.build_int_neg(rhs, "neg").unwrap().into()),
+							_ => {Err("Not supported unary opertor")},
+						}
+					},
+					BasicTypeEnum::FloatType(_) => {
+						Err("TODO unary float type")
+					},
+					_ => Err("Not supported type"),
+				}
 			}
-			_ => {Err("Todo")}
 		}
 	}
 
@@ -301,7 +308,6 @@ struct VarInfo<'a> {
 	vtype: BasicTypeEnum<'a>
 }
 
-//#[derive(PartialEq)]
 enum VarEnv<'a> {
 	Vars(HashMap<String, VarInfo<'a>>, Box<VarEnv<'a>>),
 	Nil,
