@@ -3,7 +3,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{FunctionValue,PointerValue,BasicValueEnum};
-use inkwell::types::{BasicMetadataTypeEnum,BasicTypeEnum};
+use inkwell::types::{BasicMetadataTypeEnum,BasicTypeEnum,BasicType};
 use inkwell::IntPredicate;
 use crate::scanner::TokenType;
 use crate::ast::{AstNode,Function,Statement,Expression};
@@ -11,7 +11,7 @@ use crate::ast::{AstNode,Function,Statement,Expression};
 pub struct Compiler<'a> {
 	context: &'a Context,
 	builder: Builder<'a>,
-  module: Module<'a>,
+  pub module: Module<'a>,
 	variables: VarEnv<'a>,
 	fn_val: Option<FunctionValue<'a>>,
 }
@@ -48,7 +48,10 @@ impl <'a>Compiler<'a> {
 			.map(|v| self.get_basic_metadata_enum(v))
 			.collect::<Vec<BasicMetadataTypeEnum>>();
 		let args_types = args_types.as_slice();
-		let fn_type = self.context.void_type().fn_type(args_types, false);
+		let fn_type = match &func.prototype.ret {
+			Some(t) => self.get_basic_type_enum(&t).fn_type(args_types, false),
+			None => self.context.void_type().fn_type(args_types, false),
+		};
 		let fn_val = self.module.add_function(&func.prototype.name, fn_type, None);
 
 		// set arguments names
@@ -97,6 +100,14 @@ impl <'a>Compiler<'a> {
 		}
 	}
 
+	// fn get_type_ident(&self, v: &BasicValueEnum) -> String<'a> {
+	// 	match v.get_type() {
+	// 		BasicTypeEnum::FloatType => "float",
+	// 		BasicTypeEnum::IntType => "int",
+	// 		_ => panic!("Not supported type"),
+	// 	}
+	// }
+
 	/// Creates a new stack allocation instruction in the entry block of the function.
 	fn create_entry_block_alloca(&self, name: &str) -> PointerValue<'a> {
 		let builder = self.context.create_builder();
@@ -119,6 +130,11 @@ impl <'a>Compiler<'a> {
 			Statement::Block{stmts} => {
 				let _ = stmts.iter().for_each(|s| self.visit_stmt(s).expect("visit block"));
 			},
+			Statement::ReturnStmt(expr) => {
+				let r = self.visit_expr(expr).expect("expect result");
+				// todo: check type
+				self.builder.build_return(Some(&r)).unwrap();
+			}
 			Statement::VarDecl{variable, vtype, expr} => {
 				let var_val = match expr {
 					Some(e) => {
@@ -207,13 +223,28 @@ impl <'a>Compiler<'a> {
 					None => Err("Could not find a matching variable"),
 				}
 			},
-			// Expression::BinaryExpr(left, operator, right) => {
-			// 	let lhs = self.visit_expr(left)?;
-			// 	let rhs = self.visit_expr(right)?;
-			// 	match operator.token {
-			// 		TokenType::Plus => 
-			// 	}
-			// }
+			Expression::BinaryExpr{left, operator, right} => {
+				let lhs = self.visit_expr(left)?;
+				let rhs = self.visit_expr(right)?;
+				let vtype = lhs.get_type();
+				match vtype {
+					BasicTypeEnum::IntType(_) => {
+						let lhs = lhs.into_int_value();
+						let rhs = rhs.into_int_value();
+						match operator.token {
+							TokenType::Plus => Ok(self.builder.build_int_add(lhs, rhs, "add").unwrap().into()),
+							TokenType::Minus => Ok(self.builder.build_int_sub(lhs, rhs, "sub").unwrap().into()),
+							TokenType::Star => Ok(self.builder.build_int_mul(lhs, rhs, "mul").unwrap().into()),
+							TokenType::Slash => Ok(self.builder.build_int_signed_div(lhs, rhs, "div").unwrap().into()),
+							_ => {Err("Todo")},
+						}
+					},
+					BasicTypeEnum::FloatType(_) => {
+						Err("TODO float type")
+					},
+					_ => Err("Not supported type"),
+				}
+			}
 			_ => {Err("Todo")}
 		}
 	}

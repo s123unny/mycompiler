@@ -14,6 +14,7 @@ pub enum Expression {
 pub enum Statement {
 	ExprStmt(Expression),
 	Block{stmts: Vec<Statement>},
+	ReturnStmt(Expression),
 	VarDecl{variable: Token, vtype: Option<TokenType>, expr: Option<Expression>},
 	AssignStmt{variable: Token, operator: Token, expr: Expression},
 	SelectionStmt{cond: Expression, if_stmt: Box<Statement>, else_stmt: Option<Box<Statement>>}
@@ -28,6 +29,7 @@ pub struct Prototype {
 	pub name: String,
 	pub args: Vec<String>,
 	pub atypes: Vec<TokenType>,
+	pub ret: Option<TokenType>,
 }
 
 pub enum AstNode {
@@ -127,27 +129,38 @@ fn parse_prototype(tokens: &mut Vec<Token>) -> ParsingResult<Prototype> {
 	expect!(tokens, "expected '(' in prototype", [TokenType::LeftParen, source, true]);
 	let mut args = Vec::new();
 	let mut atypes = Vec::new();
+	let mut ret: Option<TokenType> = None;
 	if peek!(tokens, TokenType::RightParen) {
 		tokens.pop();
-		return Good(Prototype{ name, args, atypes });
+		return Good(Prototype{ name, args, atypes, ret });
+	} else {
+		loop {
+			expect!(tokens, "expected identifier in prototype", [
+				TokenType::Identifier(arg), source, args.push(arg.clone())
+			]);
+			expect!(tokens, "expected ':' in prototype", [TokenType::Colon, source, {}]);
+			expect!(tokens, "expected type in prototype", [
+				TokenType::I32, source, atypes.push(TokenType::I32);
+				TokenType::I64, source, atypes.push(TokenType::I64);
+				TokenType::F32, source, atypes.push(TokenType::F32);
+				TokenType::F64, source, atypes.push(TokenType::F64)
+			]);
+			expect!(tokens, "expected ')' in prototype", [
+				TokenType::Comma, source, continue;
+				TokenType::RightParen, source, break
+			]);
+		}
 	}
-	loop {
-		expect!(tokens, "expected identifier in prototype", [
-			TokenType::Identifier(arg), source, args.push(arg.clone())
-		]);
-		expect!(tokens, "expected ':' in prototype", [TokenType::Colon, source, {}]);
-		expect!(tokens, "expected type in prototype", [
-			TokenType::I32, source, atypes.push(TokenType::I32);
-			TokenType::I64, source, atypes.push(TokenType::I64);
-			TokenType::F32, source, atypes.push(TokenType::F32);
-			TokenType::F64, source, atypes.push(TokenType::F64)
-		]);
-		expect!(tokens, "expected ')' in prototype", [
-			TokenType::Comma, source, continue;
-			TokenType::RightParen, source, break
+	if peek!(tokens, TokenType::Arrow) {
+		tokens.pop();
+		ret = expect!(tokens, "expected type after arrow", [
+			TokenType::I32, source, Some(TokenType::I32);
+			TokenType::I64, source, Some(TokenType::I64);
+			TokenType::F32, source, Some(TokenType::F32);
+			TokenType::F64, source, Some(TokenType::F64)
 		]);
 	}
-	Good(Prototype{ name, args, atypes })
+	Good(Prototype{ name, args, atypes, ret })
 }
 
 fn parse_block(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
@@ -207,6 +220,12 @@ fn parse_stmt(tokens: &mut Vec<Token>) -> ParsingResult<Statement> {
 		Some(Token{ token: TokenType::LeftBrace, .. }) => parse_try!(parse_block, tokens),
 		Some(Token{ token: TokenType::If, .. }) => parse_try!(parse_selection, tokens),
 		Some(Token{ token: TokenType::Var, .. }) => parse_try!(parse_var_decl, tokens),
+		Some(Token{ token: TokenType::Return, .. }) => {
+			expect!(tokens, "expected 'return'", [TokenType::Return, source, {}]);
+			let expr = parse_try!(parse_expr, tokens);
+			expect!(tokens, "expected ';' at the end of statement", [TokenType::Semicolon, source, {}]);
+			Statement::ReturnStmt(expr)
+		}
 		Some(Token{ token: TokenType::Identifier(_), .. }) => {
 			if peek_next!(tokens, TokenType::Equal) {
 				let variable = tokens.pop().expect("expected token");
@@ -313,6 +332,7 @@ impl fmt::Display for Statement {
 				}
 				write!(f, "}}\n")
 			},
+			Statement::ReturnStmt(e) => write!(f, "return {e}"),
 			Statement::VarDecl{variable, vtype, expr} => {
 				write!(f, "{}", variable.token)?;
 				if let Some(vt) = vtype {

@@ -60,13 +60,16 @@ impl Scanner {
 			')' => self.add_token(col, TokenType::RightParen),
 			'{' => self.add_token(col, TokenType::LeftBrace),
 			'}' => self.add_token(col, TokenType::RightBrace),
-			'-' => self.add_token(col, TokenType::Minus),
 			'+' => self.add_token(col, TokenType::Plus),
 			'/' => self.add_token(col, TokenType::Slash),
 			'*' => self.add_token(col, TokenType::Star),
 			';' => self.add_token(col, TokenType::Semicolon),
 			':' => self.add_token(col, TokenType::Colon),
 			',' => self.add_token(col, TokenType::Comma),
+			'-' => {
+				let token = if self.expect(chars, '>') { TokenType::Arrow } else { TokenType::Minus };
+				self.add_token(col, token);
+			},
 			'!' => {
 				let token = if self.expect(chars, '=') { TokenType::NotEqual } else { TokenType::Not };
 				self.add_token(col, token);
@@ -199,13 +202,14 @@ impl Scanner {
 pub enum TokenType {
   // Single-character tokens.
   LeftParen, RightParen, LeftBrace, RightBrace,
-  Minus, Plus, Slash, Star, Semicolon, Colon, Comma,
+  Plus, Slash, Star, Semicolon, Colon, Comma,
 
   // One or two character tokens.
   Not, NotEqual,
   Equal, EqualEqual,
   Greater, GreaterEqual,
   Less, LessEqual,
+	Minus, Arrow,
 
   // Literals.
   String(String), Integer(u64), Float(f64), True, False,
@@ -236,6 +240,7 @@ impl fmt::Display for TokenType {
 			TokenType::LeftBrace => write!(f, "{{"),
 			TokenType::RightBrace => write!(f, "}}"),
 			TokenType::Minus => write!(f, "-"),
+			TokenType::Arrow => write!(f, "->"),
 			TokenType::Plus => write!(f, "+"),
 			TokenType::Slash => write!(f, "/"),
 			TokenType::Star => write!(f, "*"),
