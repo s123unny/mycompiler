@@ -5,8 +5,9 @@ use inkwell::module::Module;
 use inkwell::values::{FunctionValue,PointerValue,BasicValueEnum};
 use inkwell::types::{BasicMetadataTypeEnum,BasicTypeEnum,BasicType};
 use inkwell::IntPredicate;
-use crate::scanner::TokenType;
+use crate::scanner::{Token, TokenType};
 use crate::ast::{AstNode,Function,Statement,Expression};
+use crate::ir::GenResult::{Good,Bad};
 
 pub struct Compiler<'a> {
 	context: &'a Context,
@@ -14,6 +15,38 @@ pub struct Compiler<'a> {
   pub module: Module<'a>,
 	variables: VarEnv<'a>,
 	fn_val: Option<FunctionValue<'a>>,
+}
+
+enum GenResult<T> {
+	Good(T),
+	Bad
+}
+
+fn error<T>(m: &str, found: Option<Token>) -> GenResult<T> {
+	match found {
+		Some(t) => println!("file:{}:{}: {}", t.source.line, t.source.col, m),
+		None => println!("file: {}", m),
+	}
+	Bad
+}
+
+macro_rules! gen_try {
+	($self:ident, $function:ident, $($arg:ident),+) => {
+		match $self.$function($($arg),+) {
+			Good(ir) => ir,
+			Bad => return Bad
+		}
+	}
+}
+
+macro_rules! type_equal {
+	($val:expr, $basic_type:expr, $error:expr) => {
+		if $val.get_type() == $basic_type {
+			Good($val)
+		} else {
+			return error($error, None)
+		}
+	}
 }
 
 impl <'a>Compiler<'a> {
@@ -34,7 +67,7 @@ impl <'a>Compiler<'a> {
 		println!("complete compile");
 		self.module.print_to_stderr();
 	}
-	fn visit_func(&mut self, func: &Function) -> Result<FunctionValue<'a>, &'static str> {
+	fn visit_func(&mut self, func: &Function) -> GenResult<FunctionValue<'a>> {
 		let args_types = func.prototype.atypes.iter()
 			.map(|v| self.get_basic_metadata_enum(v))
 			.collect::<Vec<BasicMetadataTypeEnum>>();
@@ -66,7 +99,7 @@ impl <'a>Compiler<'a> {
 
 		let _body = self.visit_stmt(&func.body);
 
-		Ok(fn_val)
+		Good(fn_val)
 	}
 
 	fn get_basic_metadata_enum(&self, v: &TokenType) -> BasicMetadataTypeEnum<'a> {
@@ -113,24 +146,24 @@ impl <'a>Compiler<'a> {
 		builder.build_alloca(self.context.f64_type(), name).unwrap()
 	}
 
-	fn visit_stmt(&mut self, stmt: &Statement) -> Result<(), &'static str> {
+	fn visit_stmt(&mut self, stmt: &Statement) -> GenResult<()> {
 		match stmt {
 			Statement::ExprStmt(expr) => {
 				let _ = self.visit_expr(expr);
 			},
 			Statement::Block{stmts} => {
-				let _ = stmts.iter().for_each(|s| self.visit_stmt(s).expect("visit block"));
+				let _ = stmts.iter().for_each(|s| { self.visit_stmt(s); });
 			},
 			Statement::ReturnStmt(expr) => {
-				let r = self.visit_expr(expr).expect("expect result");
+				let r = gen_try!(self, visit_expr, expr);
 				// todo: check type
 				self.builder.build_return(Some(&r)).unwrap();
 			}
 			Statement::VarDecl{variable, vtype, expr} => {
 				let var_val = match expr {
 					Some(e) => {
-						let r = self.visit_expr(e).expect("expect result");
-						self.type_check(r, vtype)?
+						let r = gen_try!(self, visit_expr, e);
+						gen_try!(self, type_check, r, vtype)
 					},
 					None => {
 						let v = vtype.as_ref().expect("Missing type in variable declaration");
@@ -147,19 +180,19 @@ impl <'a>Compiler<'a> {
 				self.variables.insert(var_name.clone(), alloca, var_val.get_type());
 			},
 			Statement::AssignStmt{variable, operator: _, expr} => {
-				let r = self.visit_expr(expr).expect("expect result");
+				let r = gen_try!(self, visit_expr, expr);
 				let TokenType::Identifier(ref var_name) = variable.token else {
 					panic!("not an identifier");
 				};
-				let var = self.variables.get(&var_name).ok_or("Undefined variable.")?;
-				// todo: check type
+				let var = self.variables.get(&var_name).expect("Undefined variable."); // todo: catch error
+				type_equal!(r, var.vtype, "expect type equal in AssignStmt");
 				self.builder.build_store(var.pos, r).unwrap();
 			}
 			Statement::SelectionStmt{cond, if_stmt, else_stmt} => {
 				let parent = self.fn_val.expect("expect FunctionValue");
 
 				let zero_const = self.context.i64_type().const_int(0, false);
-				let cond = self.visit_expr(cond)?.into_int_value();
+				let cond = gen_try!(self, visit_expr, cond).into_int_value();
 				let cond = self.builder.build_int_compare(IntPredicate::NE, cond, zero_const, "id_cond").unwrap();
 
 				let then_bb = self.context.append_basic_block(parent, "then");
@@ -170,7 +203,7 @@ impl <'a>Compiler<'a> {
 
 				// build then block
 				self.builder.position_at_end(then_bb);
-				self.visit_stmt(if_stmt)?;
+				gen_try!(self, visit_stmt, if_stmt);
 				self.builder.build_unconditional_branch(cont_bb).unwrap();
 
 				let _then_bb = self.builder.get_insert_block().unwrap();
@@ -178,7 +211,7 @@ impl <'a>Compiler<'a> {
 				// build else block
 				self.builder.position_at_end(else_bb);
 				if let Some(stmt) = else_stmt {
-					self.visit_stmt(stmt)?;
+					gen_try!(self, visit_stmt, stmt);
 				}
 				self.builder.build_unconditional_branch(cont_bb).unwrap();
 
@@ -188,10 +221,10 @@ impl <'a>Compiler<'a> {
 				self.builder.position_at_end(cont_bb);
 			},
 		};
-		Ok(())
+		Good(())
 	}
 
-	fn visit_expr(&self, expr: &Expression) -> Result<BasicValueEnum<'a>, &'static str> {
+	fn visit_expr(&self, expr: &Expression) -> GenResult<BasicValueEnum<'a>> {
 		match expr {
 			Expression::LiteralExpr(token) => {
 				let l = match token.token {
@@ -202,55 +235,55 @@ impl <'a>Compiler<'a> {
 					TokenType::False => self.context.bool_type().const_int(0, false).into(),
 					_ => panic!("not literal tokens"),
 				};
-				Ok(l)
+				Good(l)
 			},
 			Expression::VaraibleExpr(token) => {
 				let TokenType::Identifier(ref name) = token.token else {
 					panic!("not identifier");
 				};
 				match self.variables.get(&name) {
-					Some(v) => Ok(self.build_load(v.vtype, v.pos, name.as_str())),
-					None => Err("Could not find a matching variable"),
+					Some(v) => Good(self.build_load(v.vtype, v.pos, name.as_str())),
+					None => error("Could not find a matching variable", None),
 				}
 			},
 			Expression::BinaryExpr{left, operator, right} => {
-				let lhs = self.visit_expr(left)?;
-				let rhs = self.visit_expr(right)?;
+				let lhs = gen_try!(self, visit_expr, left);
+				let rhs = gen_try!(self, visit_expr, right);
 				let vtype = lhs.get_type();
 				match vtype {
 					BasicTypeEnum::IntType(_) => {
 						let lhs = lhs.into_int_value();
 						let rhs = rhs.into_int_value();
 						match operator.token {
-							TokenType::Plus => Ok(self.builder.build_int_add(lhs, rhs, "add").unwrap().into()),
-							TokenType::Minus => Ok(self.builder.build_int_sub(lhs, rhs, "sub").unwrap().into()),
-							TokenType::Star => Ok(self.builder.build_int_mul(lhs, rhs, "mul").unwrap().into()),
-							TokenType::Slash => Ok(self.builder.build_int_signed_div(lhs, rhs, "div").unwrap().into()),
-							_ => {Err("Todo")},
+							TokenType::Plus => Good(self.builder.build_int_add(lhs, rhs, "add").unwrap().into()),
+							TokenType::Minus => Good(self.builder.build_int_sub(lhs, rhs, "sub").unwrap().into()),
+							TokenType::Star => Good(self.builder.build_int_mul(lhs, rhs, "mul").unwrap().into()),
+							TokenType::Slash => Good(self.builder.build_int_signed_div(lhs, rhs, "div").unwrap().into()),
+							_ => {error("Todo", None)},
 						}
 					},
 					BasicTypeEnum::FloatType(_) => {
-						Err("TODO float type")
+						error("TODO float type", None)
 					},
-					_ => Err("Not supported type"),
+					_ => panic!("Not supported type"),
 				}
 			},
 			Expression::UnaryExpr{operator, right} => {
-				let rhs = self.visit_expr(right)?;
+				let rhs = gen_try!(self, visit_expr, right);
 				let vtype = rhs.get_type();
 				match vtype {
 					BasicTypeEnum::IntType(_) => {
 						let rhs = rhs.into_int_value();
 						match operator.token {
-							TokenType::Not => Ok(self.builder.build_not(rhs, "not").unwrap().into()),
-							TokenType::Minus => Ok(self.builder.build_int_neg(rhs, "neg").unwrap().into()),
-							_ => {Err("Not supported unary opertor")},
+							TokenType::Not => Good(self.builder.build_not(rhs, "not").unwrap().into()),
+							TokenType::Minus => Good(self.builder.build_int_neg(rhs, "neg").unwrap().into()),
+							_ => {panic!("Not supported unary opertor")},
 						}
 					},
 					BasicTypeEnum::FloatType(_) => {
-						Err("TODO unary float type")
+						error("TODO unary float type", None)
 					},
-					_ => Err("Not supported type"),
+					_ => panic!("Not supported type"),
 				}
 			}
 		}
@@ -260,45 +293,15 @@ impl <'a>Compiler<'a> {
 		self.builder.build_load(vtype, ptr, name).unwrap()
 	}
 
-	fn type_check(&self, val: BasicValueEnum<'a>, expect_type: &Option<TokenType>) -> Result<BasicValueEnum<'a>, &'static str> {
+	fn type_check(&self, val: BasicValueEnum<'a>, expect_type: &Option<TokenType>) -> GenResult<BasicValueEnum<'a>> {
 		match expect_type {
-			None => Ok(val),
-			Some(TokenType::I32) => {
-				if val.get_type() == BasicTypeEnum::IntType(self.context.i32_type()) {
-					Ok(val)
-				} else {
-					Err("expected i32")
-				}
-			},
-			Some(TokenType::I64) => {
-				if val.get_type() == BasicTypeEnum::IntType(self.context.i64_type()) {
-					Ok(val)
-				} else {
-					Err("expected i64")
-				}
-			},
-			Some(TokenType::F32) => {
-				if val.get_type() == BasicTypeEnum::FloatType(self.context.f32_type()) {
-					Ok(val)
-				} else {
-					Err("expected f32")
-				}
-			},
-			Some(TokenType::F64) => {
-				if val.get_type() == BasicTypeEnum::FloatType(self.context.f64_type()) {
-					Ok(val)
-				} else {
-					Err("expected f64")
-				}
-			},
-			Some(TokenType::Bool) => {
-				if val.get_type() == BasicTypeEnum::IntType(self.context.bool_type()) {
-					Ok(val)
-				} else {
-					Err("expected bool")
-				}
-			},
-			_ => panic!("Not type token"),
+			None => Good(val),
+			Some(TokenType::I32) => type_equal!(val, BasicTypeEnum::IntType(self.context.i32_type()), "expected i32"),
+			Some(TokenType::I64) => type_equal!(val, BasicTypeEnum::IntType(self.context.i64_type()), "expected i64"),
+			Some(TokenType::F32) => type_equal!(val, BasicTypeEnum::FloatType(self.context.f32_type()), "expected f32"),
+			Some(TokenType::F64) => type_equal!(val, BasicTypeEnum::FloatType(self.context.f64_type()), "expected f64"),
+			Some(TokenType::Bool) => type_equal!(val, BasicTypeEnum::IntType(self.context.bool_type()), "expected bool"),
+			_ => error("type_check: Not type token", None),
 		}
 	}
 }
