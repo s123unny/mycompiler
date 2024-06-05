@@ -77,7 +77,7 @@ fn compile(config: Config) -> Result<(), Box<dyn Error>> {
 	let ast = ast::parse_ast(&mut scanner.tokens);
 	let context = Context::create();
 	let mut compiler = ir::Compiler::new(&context);
-	compiler.compile(ast);
+	compiler.compile(ast)?;
 	compiler.module.verify()?;
 	run_passes_on(&compiler.module);
 

@@ -59,13 +59,17 @@ impl <'a>Compiler<'a> {
 			fn_val: None
 		}
 	}
-	pub fn compile(&mut self, ast: Vec<AstNode>) {
+	pub fn compile(&mut self, ast: Vec<AstNode>) -> Result<(),  &'static str> {
 		for node in ast {
 			let AstNode::FunctionNode(func) = node;
-			let _ = self.visit_func(&func);
+			match self.visit_func(&func) {
+				Bad => { return Err("compile error"); },
+				_ => {}
+			}
 		}
 		println!("complete compile");
 		self.module.print_to_stderr();
+		Ok(())
 	}
 	fn visit_func(&mut self, func: &Function) -> GenResult<FunctionValue<'a>> {
 		let args_types = func.prototype.atypes.iter()
@@ -97,7 +101,8 @@ impl <'a>Compiler<'a> {
 			self.variables.insert(func.prototype.args[i].clone(), alloca, arg.get_type());
 		}
 
-		let _body = self.visit_stmt(&func.body);
+		let body = &func.body;
+		gen_try!(self, visit_stmt, body);
 
 		Good(fn_val)
 	}
@@ -149,14 +154,20 @@ impl <'a>Compiler<'a> {
 	fn visit_stmt(&mut self, stmt: &Statement) -> GenResult<()> {
 		match stmt {
 			Statement::ExprStmt(expr) => {
-				let _ = self.visit_expr(expr);
+				gen_try!(self, visit_expr, expr);
 			},
 			Statement::Block{stmts} => {
-				let _ = stmts.iter().for_each(|s| { self.visit_stmt(s); });
+				for s in stmts.iter() {
+					gen_try!(self, visit_stmt, s);
+				}
 			},
 			Statement::ReturnStmt(expr) => {
 				let r = gen_try!(self, visit_expr, expr);
-				// todo: check type
+				let ret_type = self.fn_val.expect("expect FunctionValue").get_type().get_return_type();
+				match ret_type {
+					None => return error("mismatched type: return type is void", None),
+					Some(t) => {type_equal!(r, t, "return type not match");}
+				}
 				self.builder.build_return(Some(&r)).unwrap();
 			}
 			Statement::VarDecl{variable, vtype, expr} => {
