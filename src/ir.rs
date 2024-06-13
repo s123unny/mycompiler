@@ -265,11 +265,25 @@ impl <'a>Compiler<'a> {
 					BasicTypeEnum::IntType(_) => {
 						let lhs = lhs.into_int_value();
 						let rhs = rhs.into_int_value();
+						macro_rules! build_int_compare {
+							($op:expr, $name:expr) => {
+								Good({
+									let cmp = self.builder.build_int_compare($op, lhs, rhs, $name).unwrap();
+									self.builder.build_int_cast(cmp, self.context.i64_type(), "tmpcast").unwrap().into()
+								})
+							}
+						}
 						match operator.token {
 							TokenType::Plus => Good(self.builder.build_int_add(lhs, rhs, "add").unwrap().into()),
 							TokenType::Minus => Good(self.builder.build_int_sub(lhs, rhs, "sub").unwrap().into()),
 							TokenType::Star => Good(self.builder.build_int_mul(lhs, rhs, "mul").unwrap().into()),
 							TokenType::Slash => Good(self.builder.build_int_signed_div(lhs, rhs, "div").unwrap().into()),
+							TokenType::NotEqual => build_int_compare!(IntPredicate::NE, "neq"),
+							TokenType::EqualEqual => build_int_compare!(IntPredicate::EQ, "eq"),
+							TokenType::Greater => build_int_compare!(IntPredicate::SGT, "gt"),
+							TokenType::GreaterEqual => build_int_compare!(IntPredicate::SGE, "ge"),
+							TokenType::Less => build_int_compare!(IntPredicate::SLT, "lt"),
+							TokenType::LessEqual => build_int_compare!(IntPredicate::SLE, "le"),
 							_ => {error("Todo", None)},
 						}
 					},
