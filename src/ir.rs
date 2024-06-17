@@ -4,8 +4,8 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{FunctionValue,PointerValue,BasicValueEnum};
 use inkwell::types::{BasicMetadataTypeEnum,BasicTypeEnum,BasicType};
-use inkwell::IntPredicate;
-use crate::scanner::{Token, TokenType};
+use inkwell::{IntPredicate,FloatPredicate};
+use crate::scanner::{Token,TokenType};
 use crate::ast::{AstNode,Function,Statement,Expression};
 use crate::ir::GenResult::{Good,Bad};
 
@@ -129,14 +129,6 @@ impl <'a>Compiler<'a> {
 		}
 	}
 
-	// fn get_type_ident(&self, v: &BasicValueEnum) -> String<'a> {
-	// 	match v.get_type() {
-	// 		BasicTypeEnum::FloatType => "float",
-	// 		BasicTypeEnum::IntType => "int",
-	// 		_ => panic!("Not supported type"),
-	// 	}
-	// }
-
 	/// Creates a new stack allocation instruction in the entry block of the function.
 	fn create_entry_block_alloca(&self, name: &str) -> PointerValue<'a> {
 		let builder = self.context.create_builder();
@@ -258,40 +250,7 @@ impl <'a>Compiler<'a> {
 				}
 			},
 			Expression::BinaryExpr{left, operator, right} => {
-				let lhs = gen_try!(self, visit_expr, left);
-				let rhs = gen_try!(self, visit_expr, right);
-				let vtype = lhs.get_type();
-				match vtype {
-					BasicTypeEnum::IntType(_) => {
-						let lhs = lhs.into_int_value();
-						let rhs = rhs.into_int_value();
-						macro_rules! build_int_compare {
-							($op:expr, $name:expr) => {
-								Good({
-									let cmp = self.builder.build_int_compare($op, lhs, rhs, $name).unwrap();
-									self.builder.build_int_cast(cmp, self.context.i64_type(), "tmpcast").unwrap().into()
-								})
-							}
-						}
-						match operator.token {
-							TokenType::Plus => Good(self.builder.build_int_add(lhs, rhs, "add").unwrap().into()),
-							TokenType::Minus => Good(self.builder.build_int_sub(lhs, rhs, "sub").unwrap().into()),
-							TokenType::Star => Good(self.builder.build_int_mul(lhs, rhs, "mul").unwrap().into()),
-							TokenType::Slash => Good(self.builder.build_int_signed_div(lhs, rhs, "div").unwrap().into()),
-							TokenType::NotEqual => build_int_compare!(IntPredicate::NE, "neq"),
-							TokenType::EqualEqual => build_int_compare!(IntPredicate::EQ, "eq"),
-							TokenType::Greater => build_int_compare!(IntPredicate::SGT, "gt"),
-							TokenType::GreaterEqual => build_int_compare!(IntPredicate::SGE, "ge"),
-							TokenType::Less => build_int_compare!(IntPredicate::SLT, "lt"),
-							TokenType::LessEqual => build_int_compare!(IntPredicate::SLE, "le"),
-							_ => {error("Todo", None)},
-						}
-					},
-					BasicTypeEnum::FloatType(_) => {
-						error("TODO float type", None)
-					},
-					_ => panic!("Not supported type"),
-				}
+				self.visit_binary_expr(left, operator, right)
 			},
 			Expression::UnaryExpr{operator, right} => {
 				let rhs = gen_try!(self, visit_expr, right);
@@ -311,6 +270,65 @@ impl <'a>Compiler<'a> {
 					_ => panic!("Not supported type"),
 				}
 			}
+		}
+	}
+
+	fn visit_binary_expr(&self, left: &Expression, operator: &Token, right: &Expression) -> GenResult<BasicValueEnum<'a>> {
+		let lhs = gen_try!(self, visit_expr, left);
+		let rhs = gen_try!(self, visit_expr, right);
+		let vtype = lhs.get_type();
+		match vtype {
+			BasicTypeEnum::IntType(_) => {
+				let lhs = lhs.into_int_value();
+				let rhs = rhs.into_int_value();
+				macro_rules! build_int_compare {
+					($op:expr, $name:expr) => {
+						Good({
+							let cmp = self.builder.build_int_compare($op, lhs, rhs, $name).unwrap();
+							self.builder.build_int_cast(cmp, self.context.i64_type(), "tmpcast").unwrap().into()
+						})
+					}
+				}
+				match operator.token {
+					TokenType::Plus => Good(self.builder.build_int_add(lhs, rhs, "add").unwrap().into()),
+					TokenType::Minus => Good(self.builder.build_int_sub(lhs, rhs, "sub").unwrap().into()),
+					TokenType::Star => Good(self.builder.build_int_mul(lhs, rhs, "mul").unwrap().into()),
+					TokenType::Slash => Good(self.builder.build_int_signed_div(lhs, rhs, "div").unwrap().into()),
+					TokenType::NotEqual => build_int_compare!(IntPredicate::NE, "neq"),
+					TokenType::EqualEqual => build_int_compare!(IntPredicate::EQ, "eq"),
+					TokenType::Greater => build_int_compare!(IntPredicate::SGT, "gt"),
+					TokenType::GreaterEqual => build_int_compare!(IntPredicate::SGE, "ge"),
+					TokenType::Less => build_int_compare!(IntPredicate::SLT, "lt"),
+					TokenType::LessEqual => build_int_compare!(IntPredicate::SLE, "le"),
+					_ => panic!("Not supported type"),
+				}
+			},
+			BasicTypeEnum::FloatType(_) => {
+				let lhs = lhs.into_float_value();
+				let rhs = rhs.into_float_value();
+				macro_rules! build_float_compare {
+					($op:expr, $name:expr) => {
+						Good({
+							let cmp = self.builder.build_float_compare($op, lhs, rhs, $name).unwrap();
+							self.builder.build_int_cast(cmp, self.context.i64_type(), "tmpcast").unwrap().into()
+						})
+					}
+				}
+				match operator.token {
+					TokenType::Plus => Good(self.builder.build_float_add(lhs, rhs, "add").unwrap().into()),
+					TokenType::Minus => Good(self.builder.build_float_sub(lhs, rhs, "sub").unwrap().into()),
+					TokenType::Star => Good(self.builder.build_float_mul(lhs, rhs, "mul").unwrap().into()),
+					TokenType::Slash => Good(self.builder.build_float_div(lhs, rhs, "div").unwrap().into()),
+					TokenType::NotEqual => build_float_compare!(FloatPredicate::UNE, "neq"),
+					TokenType::EqualEqual => build_float_compare!(FloatPredicate::UEQ, "eq"),
+					TokenType::Greater => build_float_compare!(FloatPredicate::UGT, "gt"),
+					TokenType::GreaterEqual => build_float_compare!(FloatPredicate::UGE, "ge"),
+					TokenType::Less => build_float_compare!(FloatPredicate::ULT, "lt"),
+					TokenType::LessEqual => build_float_compare!(FloatPredicate::ULE, "le"),
+					_ => panic!("Not supported type"),
+				}
+			},
+			_ => panic!("Not supported type"),
 		}
 	}
 
