@@ -9,6 +9,7 @@ pub enum Expression {
 	VaraibleExpr(Token),
 	BinaryExpr{left: Box<Expression>, operator: Token, right: Box<Expression>},
 	UnaryExpr{operator: Token, right: Box<Expression>},
+	CallExpr{fn_name: Token, args: Vec<Expression>},
 }
 #[derive(Debug)]
 pub enum Statement {
@@ -300,7 +301,14 @@ fn parse_primary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 		TokenType::True, source, Expression::LiteralExpr(Token{token: TokenType::True, source});
 		TokenType::False, source, Expression::LiteralExpr(Token{token: TokenType::False, source});
 		TokenType::Null, source, Expression::LiteralExpr(Token{token: TokenType::Null, source});
-		TokenType::Identifier(t), source, Expression::VaraibleExpr(Token{token: TokenType::Identifier(t), source});
+		TokenType::Identifier(t), source, {
+			if peek!(tokens, TokenType::LeftParen) {
+				let args = parse_try!(parse_argument_list, tokens);
+				Expression::CallExpr{fn_name: Token{token: TokenType::Identifier(t), source}, args}
+			} else {
+				Expression::VaraibleExpr(Token{token: TokenType::Identifier(t), source})
+			}
+		};
 		TokenType::LeftBrace, source, {
 			let expr = parse_try!(parse_expr, tokens);
 			expect!(tokens, "expected ')' after expression", [TokenType::RightBrace, source, {}]);
@@ -311,12 +319,36 @@ fn parse_primary(tokens: &mut Vec<Token>) -> ParsingResult<Expression> {
 	Good(expr)
 }
 
+fn parse_argument_list(tokens: &mut Vec<Token>) -> ParsingResult<Vec<Expression>> {
+	expect!(tokens, "expected '('", [TokenType::LeftParen, source, {}]);
+	let mut args = Vec::new();
+	if peek!(tokens, TokenType::RightParen) {
+		tokens.pop();
+		return Good(args);
+	}
+	loop {
+		args.push(parse_try!(parse_expr, tokens));
+		expect!(tokens, "expected ')' in call function", [
+			TokenType::Comma, source, continue;
+			TokenType::RightParen, source, break
+		]);
+	}
+	return Good(args);
+}
+
 impl fmt::Display for Expression {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self {
 			Expression::LiteralExpr(t) | Expression::VaraibleExpr(t) => write!(f, "{}", t.token),
 			Expression::BinaryExpr{left, operator, right} => write!(f, "({} {} {})", operator.token, left, right),
 			Expression::UnaryExpr{operator, right} => write!(f, "({} {})", operator.token, right),
+			Expression::CallExpr{fn_name, args} => {
+				write!(f, "{}(", fn_name.token)?;
+				for a in args {
+					write!(f, "{},", a)?;
+				}
+				write!(f, ")")
+			},
 		}
 	}
 }

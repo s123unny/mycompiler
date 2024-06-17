@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FunctionValue,PointerValue,BasicValueEnum};
+use inkwell::values::{FunctionValue,PointerValue,BasicValueEnum,BasicMetadataValueEnum};
 use inkwell::types::{BasicMetadataTypeEnum,BasicTypeEnum,BasicType};
 use inkwell::{IntPredicate,FloatPredicate};
 use crate::scanner::{Token,TokenType};
@@ -71,6 +71,11 @@ impl <'a>Compiler<'a> {
 		self.module.print_to_stderr();
 		Ok(())
 	}
+
+	fn get_function(&self, name: &str) -> Option<FunctionValue<'a>> {
+		self.module.get_function(name)
+	}
+
 	fn visit_func(&mut self, func: &Function) -> GenResult<FunctionValue<'a>> {
 		let args_types = func.prototype.atypes.iter()
 			.map(|v| self.get_basic_metadata_enum(v))
@@ -268,6 +273,30 @@ impl <'a>Compiler<'a> {
 						error("TODO unary float type", None)
 					},
 					_ => panic!("Not supported type"),
+				}
+			},
+			Expression::CallExpr{fn_name, args} => {
+				let TokenType::Identifier(ref name) = fn_name.token else {
+					panic!("not identifier");
+				};
+				match self.get_function(&name) {
+					Some(fun) => {
+						let mut compiled_args = Vec::with_capacity(args.len());
+						for arg in args {
+								compiled_args.push(gen_try!(self, visit_expr, arg));
+						}
+						let argsv: Vec<BasicMetadataValueEnum> =
+								compiled_args.iter().by_ref().map(|&val| val.into()).collect();
+
+						// todo: check args
+						match self.builder.build_call(fun, argsv.as_slice(), "call").unwrap()
+								.try_as_basic_value().left()
+						{
+								Some(value) => Good(value),
+								None => panic!("Invalid call produced."),
+						}
+					},
+					None => panic!("Unknown function."),
 				}
 			}
 		}
